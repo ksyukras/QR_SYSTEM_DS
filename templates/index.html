@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Сканер</title>
+    <script src="https://unpkg.com"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f8f9fa; }
+        #reader { width: 100%; max-width: 360px; margin: 10px auto; border-radius: 12px; overflow: hidden; border: 2px solid #007bff; }
+        .btn { display: block; width: 100%; max-width: 360px; margin: 10px auto; padding: 14px; font-size: 16px; border: none; border-radius: 8px; background: #007bff; color: white; font-weight: bold; }
+        .btn-danger { background: #dc3545; }
+        #result-box { display: none; margin-top: 20px; }
+        #qr-img { max-width: 90%; height: auto; border: 3px solid #28a745; border-radius: 8px; margin: 15px 0; }
+        .input-box { margin: 20px auto; max-width: 360px; text-align: left; }
+        .input-box input { width: 100%; padding: 12px; font-size: 15px; border: 2px solid #6c757d; border-radius: 6px; box-sizing: border-box; }
+        #status { font-size: 16px; font-weight: bold; color: #495057; margin: 15px 0; }
+    </style>
+</head>
+<body>
+
+    <div id="scan-flow">
+        <h2>Сканирование Data Matrix</h2>
+        <div id="reader"></div>
+        <button class="btn" id="torch-btn" onclick="toggleTorch()">Включить фонарик</button>
+        
+        <div class="input-box">
+            <label for="fallback-input"><b>Резервное поле для клавиатуры-сканера:</b></label>
+            <input type="text" id="fallback-input" placeholder="Нажмите сюда и используйте сканер телефона">
+        </div>
+    </div>
+
+    <div id="status">Запуск камеры...</div>
+
+    <div id="result-box">
+        <h3>Результат обработки:</h3>
+        <img id="qr-img" src="" alt="Сгенерированный QR-код">
+        <button class="btn btn-danger" onclick="window.location.reload()">Сбросить / Сканировать заново</button>
+    </div>
+
+    <script>
+        const sessionId = "{{ session_id }}";
+        let html5QrCode;
+        let pollTimer;
+        let torchActive = false;
+
+        function initScanner() {
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                (text) => { sendCode(text); },
+                (err) => { /* Поиск кода в кадре */ }
+            ).then(() => {
+                document.getElementById("status").innerText = "Ожидание маркировки...";
+            }).catch(() => {
+                document.getElementById("status").innerText = "Камера в браузере недоступна. Используйте резервное поле.";
+            });
+        }
+
+        function toggleTorch() {
+            if (html5QrCode && html5QrCode.isScanning) {
+                torchActive = !torchActive;
+                html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchActive }] })
+                    .then(() => {
+                        document.getElementById("torch-btn").innerText = torchActive ? "Выключить фонарик" : "Включить фонарик";
+                    }).catch(() => alert("Фонарик на этом устройстве не поддерживается браузером"));
+            }
+        }
+
+        function sendCode(code) {
+            if (!code.trim()) return;
+            if (html5QrCode && html5QrCode.isScanning) { html5QrCode.stop(); }
+            
+            document.getElementById("scan-flow").style.display = "none";
+            document.getElementById("status").innerText = "Код отправлен локальному роботу. Пожалуйста, подождите...";
+
+            fetch('/submit_code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, code: code })
+            }).then(() => {
+                pollTimer = setInterval(waitResult, 1500);
+            });
+        }
+
+        document.getElementById("fallback-input").addEventListener("input", function() {
+            if (this.value.length > 4) { sendCode(this.value); }
+        });
+
+        function waitResult() {
+            fetch(`/get_result?session_id=${sessionId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.result) {
+                        clearInterval(pollTimer);
+                        document.getElementById("status").style.display = "none";
+                        document.getElementById("qr-img").src = "data:image/png;base64," + data.result;
+                        document.getElementById("result-box").style.display = "block";
+                    }
+                });
+        }
+
+        window.onload = initScanner;
+    </script>
+</body>
+</html>
