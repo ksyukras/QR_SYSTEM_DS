@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Сканер Маркировки</title>
-    <!-- Подключаем надежную версию библиотеки сканера -->
-    <script src="https://unpkg.com"></script>
+    <!-- Используем стабильную минифицированную CDN версию библиотеки -->
+    <script src="https://cloudflare.com"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f8f9fa; color: #212529; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f8f9fa; color: #212529; }
         #reader { width: 100%; max-width: 360px; margin: 10px auto; border-radius: 12px; overflow: hidden; border: 2px solid #007bff; background: #000; min-height: 250px; display: none; }
-        .btn { display: block; width: 100%; max-width: 360px; margin: 12px auto; padding: 16px; font-size: 18px; border: none; border-radius: 10px; background: #007bff; color: white; font-weight: bold; box-shadow: 0 4px 6px rgba(0,123,255,0.15); cursor: pointer; }
+        .btn { display: block; width: 100%; max-width: 360px; margin: 12px auto; padding: 16px; font-size: 18px; border: none; border-radius: 10px; background: #007bff; color: white; font-weight: bold; cursor: pointer; }
         .btn:active { transform: scale(0.98); }
-        .btn-success { background: #28a745; box-shadow: 0 4px 6px rgba(40,167,69,0.15); }
+        .btn-success { background: #28a745; }
         .btn-danger { background: #dc3545; }
         #torch-btn { display: none; background: #6c757d; }
         #result-box { display: none; margin-top: 20px; }
@@ -26,8 +26,8 @@
     <div id="scan-flow">
         <h2>Сканирование Data Matrix</h2>
         
-        <!-- Кнопка явного старта, чтобы обойти блокировку браузеров -->
-        <button class="btn btn-success" id="start-camera-btn" onclick="requestAndStartCamera()">ВКЛЮЧИТЬ КАМЕРУ</button>
+        <!-- Кнопка прямого старта без опроса списка камер -->
+        <button class="btn btn-success" id="start-camera-btn" onclick="directStartCamera()">ВКЛЮЧИТЬ КАМЕРУ</button>
         
         <div id="reader"></div>
         <button class="btn" id="torch-btn" onclick="toggleTorch()">Включить фонарик</button>
@@ -52,62 +52,36 @@
         let pollTimer;
         let torchActive = false;
 
-        // Пошаговый запуск камеры по клику пользователя
-        function requestAndStartCamera() {
-            document.getElementById("status").innerText = "Запрашиваю доступ к камерам...";
+        // Прямой запуск задней камеры в обход зависающего getCameras()
+        function directStartCamera() {
+            document.getElementById("status").innerText = "Запуск камеры...";
             
-            // Создаем объект сканера внутри блока #reader
+            // Показываем окно для видеопотока
+            document.getElementById("start-camera-btn").style.display = "none";
+            document.getElementById("reader").style.display = "block";
+            
             html5QrCode = new Html5Qrcode("reader");
             
-            // Запрашиваем список всех доступных камер устройства
-            Html5Qrcode.getCameras().then(devices => {
-                if (devices && devices.length > 0) {
-                    // Ищем заднюю камеру (в названии обычно есть back, rear или environment)
-                    let backCameraId = null;
-                    for (let i = 0; i < devices.length; i++) {
-                        const label = devices[i].label.toLowerCase();
-                        if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
-                            backCameraId = devices[i].id;
-                            break;
-                        }
+            // Запускаем камеру напрямую, передавая facingMode вместо ID камеры
+            html5QrCode.start(
+                { facingMode: "environment" }, // Инструкция браузеру: включить заднюю камеру
+                { 
+                    fps: 15, 
+                    qrbox: function(width, height) {
+                        const minEdge = Math.min(width, height);
+                        const boxSize = Math.floor(minEdge * 0.75);
+                        return { width: boxSize, height: boxSize };
                     }
-                    
-                    // Если заднюю камеру по названию не нашли, берем самую последнюю в списке (у смартфонов это обычно основная задняя)
-                    if (!backCameraId) {
-                        backCameraId = devices[devices.length - 1].id;
-                    }
-                    
-                    // Скрываем кнопку старта и показываем окно камеры
-                    document.getElementById("start-camera-btn").style.display = "none";
-                    document.getElementById("reader").style.display = "block";
-                    
-                    // Запускаем видеопоток
-                    html5QrCode.start(
-                        backCameraId,
-                        { 
-                            fps: 10, 
-                            qrbox: function(width, height) {
-                                // Делаем квадратную зону сканирования адаптивной под экран смартфона
-                                const minEdge = Math.min(width, height);
-                                const boxSize = Math.floor(minEdge * 0.7);
-                                return { width: boxSize, height: boxSize };
-                            }
-                        },
-                        (text) => { sendCode(text); }, // Сработает при успешном сканировании
-                        (err) => { /* Поиск кода в кадре... */ }
-                    ).then(() => {
-                        document.getElementById("status").innerText = "Ожидание маркировки. Наведите на Data Matrix...";
-                        document.getElementById("torch-btn").style.display = "block";
-                    }).catch(err => {
-                        document.getElementById("status").innerText = "Ошибка запуска выбранной камеры. Проверьте разрешения в настройках телефона.";
-                        console.error(err);
-                    });
-                    
-                } else {
-                    document.getElementById("status").innerText = "Камеры не обнаружены на этом устройстве.";
-                }
+                },
+                (text) => { sendCode(text); }, // Успешное сканирование
+                (err) => { /* Поиск кода в кадре... */ }
+            ).then(() => {
+                document.getElementById("status").innerText = "Камера активна. Наведите на Data Matrix...";
+                document.getElementById("torch-btn").style.display = "block";
             }).catch(err => {
-                document.getElementById("status").innerText = "Браузер заблокировал доступ к камере. Измените разрешения.";
+                document.getElementById("reader").style.display = "none";
+                document.getElementById("start-camera-btn").style.display = "block";
+                document.getElementById("status").innerText = "Доступ к камере заблокирован. Разрешите его в настройках браузера/телефона или используйте резервное поле.";
                 console.error(err);
             });
         }
@@ -118,38 +92,33 @@
                 html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchActive }] })
                     .then(() => {
                         document.getElementById("torch-btn").innerText = torchActive ? "Выключить фонарик" : "Включить фонарик";
-                    }).catch(() => alert("Фонарик на этом устройстве недоступен для браузера (ограничение iOS Safari или модели телефона)"));
+                    }).catch(() => alert("Фонарик недоступен в этом браузере (ограничение iOS Safari)"));
             }
         }
 
         function sendCode(code) {
             if (!code.trim()) return;
             
-            // Останавливаем камеру, чтобы не тратить батарею
             if (html5QrCode && html5QrCode.isScanning) { 
                 html5QrCode.stop().catch(() => {}); 
             }
             
             document.getElementById("scan-flow").style.display = "none";
-            document.getElementById("status").innerText = "Код получен! Локальный робот на ПК обрабатывает запрос...";
+            document.getElementById("status").innerText = "Код отправлен. Робот на ПК формирует ответ...";
 
-            // Отправляем текст маркировки на Render
             fetch('/submit_code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, code: code })
             }).then(() => {
-                // Запускаем регулярную проверку готовности ответа
                 pollTimer = setInterval(waitResult, 1500);
             });
         }
 
-        // Следим за резервным текстовым полем
         document.getElementById("fallback-input").addEventListener("input", function() {
             if (this.value.length > 10) { sendCode(this.value); }
         });
 
-        // Опрос сервера
         function waitResult() {
             fetch(`/get_result?session_id=${sessionId}`)
                 .then(res => res.json())
