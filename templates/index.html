@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Сканер Маркировки</title>
-    <!-- Используем стабильную минифицированную CDN версию библиотеки -->
-    <script src="https://cloudflare.com"></script>
+    
+    <!-- ИСПРАВЛЕНО: Подключаем реальный скрипт библиотеки с CDN unpkg -->
+    <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
+    
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f8f9fa; color: #212529; }
         #reader { width: 100%; max-width: 360px; margin: 10px auto; border-radius: 12px; overflow: hidden; border: 2px solid #007bff; background: #000; min-height: 250px; display: none; }
@@ -26,7 +28,6 @@
     <div id="scan-flow">
         <h2>Сканирование Data Matrix</h2>
         
-        <!-- Кнопка прямого старта без опроса списка камер -->
         <button class="btn btn-success" id="start-camera-btn" onclick="directStartCamera()">ВКЛЮЧИТЬ КАМЕРУ</button>
         
         <div id="reader"></div>
@@ -52,28 +53,44 @@
         let pollTimer;
         let torchActive = false;
 
-        // Прямой запуск задней камеры в обход зависающего getCameras()
         function directStartCamera() {
+            // ЗАЩИТА 1: Проверяем, загрузилась ли библиотека
+            if (typeof Html5Qrcode === "undefined") {
+                alert("Ошибка: Библиотека html5-qrcode не загрузилась. Проверьте интернет-соединение.");
+                return;
+            }
+
+            // ЗАЩИТА 2: Проверяем базовую поддержку медиа-девайсов браузером
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("Ваш браузер или приложение блокирует доступ к камере. Откройте сайт через Safari (iOS) или Chrome (Android).");
+                return;
+            }
+
+            // ЗАЩИТА 3: Предупреждение о небезопасном соединении HTTP
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+                alert("Камера работает только по защищенному протоколу HTTPS. Убедитесь, что вы открыли https:// ссылку Render.");
+                return;
+            }
+
             document.getElementById("status").innerText = "Запуск камеры...";
-            
-            // Показываем окно для видеопотока
             document.getElementById("start-camera-btn").style.display = "none";
             document.getElementById("reader").style.display = "block";
             
             html5QrCode = new Html5Qrcode("reader");
             
-            // Запускаем камеру напрямую, передавая facingMode вместо ID камеры
             html5QrCode.start(
-                { facingMode: "environment" }, // Инструкция браузеру: включить заднюю камеру
+                { facingMode: "environment" }, 
                 { 
                     fps: 15, 
                     qrbox: function(width, height) {
                         const minEdge = Math.min(width, height);
                         const boxSize = Math.floor(minEdge * 0.75);
                         return { width: boxSize, height: boxSize };
-                    }
+                    },
+                    // УСКОРЕНИЕ: Фокусируемся только на кодах Честного Знака (Data Matrix)
+                    formatsToSupport: [ Html5QrcodeSupportedFormats.DATA_MATRIX ]
                 },
-                (text) => { sendCode(text); }, // Успешное сканирование
+                (text) => { sendCode(text); }, 
                 (err) => { /* Поиск кода в кадре... */ }
             ).then(() => {
                 document.getElementById("status").innerText = "Камера активна. Наведите на Data Matrix...";
@@ -81,7 +98,7 @@
             }).catch(err => {
                 document.getElementById("reader").style.display = "none";
                 document.getElementById("start-camera-btn").style.display = "block";
-                document.getElementById("status").innerText = "Доступ к камере заблокирован. Разрешите его в настройках браузера/телефона или используйте резервное поле.";
+                document.getElementById("status").innerText = "Ошибка доступа к камере.";
                 console.error(err);
             });
         }
@@ -92,7 +109,10 @@
                 html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchActive }] })
                     .then(() => {
                         document.getElementById("torch-btn").innerText = torchActive ? "Выключить фонарик" : "Включить фонарик";
-                    }).catch(() => alert("Фонарик недоступен в этом браузере (ограничение iOS Safari)"));
+                    }).catch(err => {
+                        console.log("Фонарик не поддерживается браузером:", err);
+                        alert("Фонарик на этом устройстве недоступен для браузера.");
+                    });
             }
         }
 
